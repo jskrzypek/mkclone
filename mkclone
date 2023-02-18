@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+#
+# @(#)mkclone       1.0 (Joshua Skrzypek <jskrzypek@gmail.com>) 2023-02-18
+#
+#            _        _
+#  _ __ ___ | | _____| | ___  _ __   ___
+# | '_ ` _ \| |/ / __| |/ _ \| '_ \ / _ \
+# | | | | | |   < (__| | (_) | | | |  __/
+# |_| |_| |_|_|\_\___|_|\___/|_| |_|\___|
+#
+#
+# mkclone
+# Copyright (C) Joshua Skrzypek <jskrzypek@gmail.com> 2023
+#
+# This file is part of This program.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with This program. If not, see <http://www.gnu.org/licenses/>.
+#
+#
+# mkclone - easily clone git repositories to known-good directories
+
+mkclone() {
+  mkdir -p "${MKCLONE_ROOT:-$HOME/dev}"
+  local -a requests=( "$@" )
+  local result=-1 target
+  cd "${MKCLONE_ROOT:-$HOME/dev}" || return 255
+  for request in "${requests[@]}"; do
+    ((result = result > 0 ? result : 0))
+    local cmd="${request%%:*}" source="${request##*:}"
+    echo "Requested repo is: '$source' (input: '$request', scheme: '$cmd')"
+    if [[ $request != "$source" ]]; then
+      echo "Found scheme: '$cmd'"
+    else
+      cmd="${MKCLONE_DEFAULT_PROG:-gh}"
+      echo "No scheme found, using '$cmd'"
+    fi
+    case "$source" in
+      *github.com/*/*)
+        echo "'$request' is on github, using 'gh'"
+        cmd=gh
+        target="${source##*github.com/}"
+        ;;
+      *gitlab.com/*/*)
+        echo "'$request' is on gitlab, using 'glab'"
+        cmd=glab
+        target="${source##*gitlab.com/}"
+        ;;
+      ///*)
+        echo "'$request' is a file URI?? Why do you want to clone that?"
+        result=1
+        continue
+        ;;
+      //*.*/*/*)
+        echo "'$request' is a URI, dropping // prefix from '$source'."
+        target="${source#//*.*/}"
+        ;;
+      */*/*)
+        if [[ $cmd != glab ]]; then
+          echo "There are too many segments in '$request'!"
+          result=2
+          continue
+        fi
+        ;&
+      */*)
+        echo "Assuming '$request' is a $cmd repo."
+        target="${source}"
+        ;;
+      *)
+        echo "Don't know how to parse '$request'!"
+        result=3
+        continue
+        ;;
+    esac
+    echo "Using '$cmd' to clone '$request' into ~/dev/${target%%/*}"
+    mkdir -p "${target%%/*}"
+    if ! which "$cmd" > /dev/null; then
+      echo -n "'$cmd' not installed! "
+      if [[ $cmd == gh ]]; then
+        request="git@github.com:$target"
+      elif [[ $cmd == glab ]]; then
+        request="git@gitlab.com:$target"
+      elif [[ $cmd == git ]]; then
+        echo "You don't have git... Wow... I... I just can't deal with this right now..."
+        return 100
+      fi
+      echo "Falling back to git via ssh... you do have git, right?"
+      cmd="git"
+    fi
+    case "$cmd" in
+      git*|http*)
+        runme=(git clone "$request" "$target")
+        ;;
+      gh|glab)
+        runme=("$cmd" repo clone "$target" "$target")
+        ;;
+      *)
+        echo "Don't know what to do with '$cmd' from '$request'!"
+        result=4
+        continue
+        ;;
+    esac
+    result=5
+    "${runme[@]}" || continue
+    result=0
+  done
+  cd "$target" || return 6
+  return $result
+}
